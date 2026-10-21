@@ -1,0 +1,148 @@
+`timescale 1ns/1ps
+
+module tb_round_robin_arbiter;
+
+    reg clk, rst;
+    reg [3:0] req;
+    wire [3:0] gnt;
+
+    integer tests, errors;
+
+    round_robin_arbiter dut (
+        .clk(clk),
+        .rst(rst),
+        .req(req),
+        .gnt(gnt)
+    );
+
+    // Generate a clock with a 10 ns period.
+    always #5 clk = ~clk;
+
+    // Apply requests on the falling edge.
+    // Check the grant after the next rising edge.
+    task check;
+        input [3:0] requests;
+        input [3:0] expected;
+
+        begin
+            @(negedge clk);
+            req = requests;
+
+            @(posedge clk);
+            #1;
+
+            tests = tests + 1;
+
+            if (gnt !== expected) begin
+                errors = errors + 1;
+                $display(
+                    "FAIL t=%0t req=%b gnt=%b expected=%b",
+                    $time, req, gnt, expected
+                );
+            end
+            else begin
+                $display(
+                    "PASS t=%0t req=%b gnt=%b",
+                    $time, req, gnt
+                );
+            end
+        end
+    endtask
+
+    // Assert reset between clock edges.
+    // This verifies asynchronous clearing of the grant.
+    task reset_dut;
+        begin
+            @(negedge clk);
+            #2 rst = 1;
+            #1;
+
+            tests = tests + 1;
+
+            if (gnt !== 4'b0000) begin
+                errors = errors + 1;
+                $display("FAIL: reset did not clear grant");
+            end
+
+            @(negedge clk);
+            req = 0; // Avoid an extra grant before the next check.
+            rst = 0;
+        end
+    endtask
+
+    initial begin
+        clk = 0;
+        rst = 0;
+        req = 0;
+
+        tests  = 0;
+        errors = 0;
+
+        // Generate a waveform file for GTKWave.
+        $dumpfile("round_robin.vcd");
+        $dumpvars(0, tb_round_robin_arbiter);
+
+        reset_dut;
+
+        // Test 1: No requests.
+        check(4'b0000, 4'b0000);
+
+        // Test 2: All four request continuously.
+        // Each requester must win once every four cycles.
+        repeat (4) begin
+            check(4'b1111, 4'b0001);
+            check(4'b1111, 4'b0010);
+            check(4'b1111, 4'b0100);
+            check(4'b1111, 4'b1000);
+        end
+
+        // Test 3: Only requesters 1 and 3 are active.
+        // Grants must alternate between them.
+        repeat (3) begin
+            check(4'b1010, 4'b0010);
+            check(4'b1010, 4'b1000);
+        end
+
+        // Test 4: Each requester alone.
+        // A lone requester can receive consecutive grants.
+        check(4'b0001, 4'b0001);
+        check(4'b0010, 4'b0010);
+        check(4'b0100, 4'b0100);
+        check(4'b0100, 4'b0100);
+        check(4'b1000, 4'b1000);
+
+        // Test 5: Changing requests and circular wraparound.
+        check(4'b0101, 4'b0001);
+        check(4'b1100, 4'b0100);
+        check(4'b0011, 4'b0001);
+
+        // Test 6: Idle cycles must preserve priority.
+        // The last winner was requester 0, so requester 1 is next.
+        check(4'b0000, 4'b0000);
+        check(4'b0000, 4'b0000);
+        check(4'b1111, 4'b0010);
+
+        // Test 7: Reset during activity.
+        // Priority must restart from requester 0.
+        reset_dut;
+
+        check(4'b1111, 4'b0001);
+        check(4'b1111, 4'b0010);
+        check(4'b1111, 4'b0100);
+        check(4'b1111, 4'b1000);
+        check(4'b0000, 4'b0000);
+
+        if (errors == 0)
+            $display(
+                "ALL TESTS PASSED: %0d checks, 0 errors", tests
+            );
+        else
+            $display(
+                "TEST FAILED: %0d errors out of %0d checks",
+                errors, tests
+            );
+
+        $finish;
+    end
+
+endmodule

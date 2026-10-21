@@ -1,0 +1,101 @@
+`timescale 1ns/1ps
+
+module tb_optimized_multiplier;
+    reg clk, reset, start;
+    reg [3:0] multiplicand, multiplier;
+    wire [7:0] product;
+    wire busy, done;
+    integer i, j, errors, tests;
+
+    optimized_multiplier dut (
+        .clk(clk), .reset(reset), .start(start),
+        .multiplicand(multiplicand), .multiplier(multiplier),
+        .product(product), .busy(busy), .done(done)
+    );
+
+    always #5 clk = ~clk; // Clock period = 10 ns.
+
+    // Drive/check on falling edges, away from DUT's rising edges.
+    task check_multiply;
+        input [3:0] x, y;
+        input show_steps;
+        reg [7:0] expected;
+        integer step;
+        begin
+            expected = x * y; // Reference only; RTL uses add-and-shift.
+            @(negedge clk);
+            multiplicand = x;
+            multiplier = y;
+            start = 1;
+            @(negedge clk);
+            start = 0;
+
+            if (busy !== 1'b1 || done !== 1'b0 ||
+                dut.A !== 4'b0000 || dut.Q !== y || dut.M !== x ||
+                dut.C !== 1'b0 || dut.count !== 3'd0) begin
+                errors = errors + 1;
+                $display("FAIL: initial load for %0d x %0d", x, y);
+            end
+            if (show_steps)
+                $display("\n%0d x %0d: initial C=%b A=%b Q=%b M=%b",
+                         x, y, dut.C, dut.A, dut.Q, dut.M);
+
+            for (step = 1; step <= 4; step = step + 1) begin
+                @(negedge clk);
+                if (show_steps)
+                    $display("Cycle %0d: C=%b A=%b Q=%b count=%0d done=%b",
+                             step, dut.C, dut.A, dut.Q, dut.count, done);
+                if (step < 4 && (done !== 1'b0 || busy !== 1'b1)) begin
+                    errors = errors + 1;
+                    $display("FAIL: incorrect completion timing");
+                end
+            end
+
+            tests = tests + 1;
+            if (product !== expected || done !== 1'b1 || busy !== 1'b0 ||
+                dut.count !== 3'd4) begin
+                errors = errors + 1;
+                $display("FAIL: %0d x %0d, expected=%0d, got=%0d",
+                         x, y, expected, product);
+            end else if (show_steps)
+                $display("PASS: %0d x %0d = %0d (%b)", x, y, product, product);
+
+            @(negedge clk);
+            if (done !== 1'b0 || busy !== 1'b0 || product !== expected) begin
+                errors = errors + 1;
+                $display("FAIL: done pulse or result retention");
+            end
+        end
+    endtask
+
+    initial begin
+        $dumpfile("multiplier.vcd");
+        $dumpvars(0, tb_optimized_multiplier);
+        clk = 0;
+        reset = 1;
+        start = 0;
+        multiplicand = 0;
+        multiplier = 0;
+        errors = 0;
+        tests = 0;
+
+        // Apply reset for two clock periods.
+        #20;
+        reset = 0;
+
+        // Required examples appear first in the waveform.
+        check_multiply(4'b1011, 4'b0111, 1'b1);
+        check_multiply(4'b0110, 4'b1001, 1'b1);
+
+        // Exhaustively check every pair of unsigned 4-bit inputs.
+        for (i = 0; i < 16; i = i + 1)
+            for (j = 0; j < 16; j = j + 1)
+                check_multiply(i, j, 1'b0);
+
+        if (errors == 0)
+            $display("\nALL %0d TESTS PASSED (2 examples + 256 input pairs)", tests);
+        else
+            $display("\nFAILED: %0d errors in %0d tests", errors, tests);
+        $finish;
+    end
+endmodule

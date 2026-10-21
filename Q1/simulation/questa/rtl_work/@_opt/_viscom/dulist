@@ -1,0 +1,2 @@
+1 19 round_robin_arbiter 4 fast 36 D:/NPU/Q1/simulation/questa/rtl_work 0 0 180224 0 132 0
+1 22 tb_round_robin_arbiter 4 fast 36 D:/NPU/Q1/simulation/questa/rtl_work 0 0 0 0 70 0

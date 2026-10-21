@@ -1,0 +1,55 @@
+`timescale 1ns/1ps
+
+// Unsigned 4-bit multiplier: one add-and-shift step per clock.
+module optimized_multiplier (
+    input        clk,
+    input        reset,
+    input        start,
+    input  [3:0] multiplicand,
+    input  [3:0] multiplier,
+    output [7:0] product,
+    output reg   busy,
+    output reg   done
+);
+    reg [3:0] M, A, Q;
+    reg       C;
+    reg [2:0] count;
+    wire [4:0] sum;
+
+    // Q[0] selects M or zero. The fifth bit preserves the carry.
+    assign sum = {1'b0, A} + (Q[0] ? {1'b0, M} : 5'b00000);
+    assign product = {A, Q};  // Final answer is valid when done = 1.
+
+    always @(posedge clk or posedge reset) begin
+        if (reset) begin
+            M <= 0;
+            A <= 0;
+            Q <= 0;
+            C <= 0;
+            count <= 0;
+            busy <= 0;
+            done <= 0;
+        end else begin
+            done <= 0;       // done is a one-clock pulse.
+
+            if (start && !busy) begin
+                M <= multiplicand;
+                Q <= multiplier;
+                A <= 0;
+                C <= 0;
+                count <= 0;
+                busy <= 1;
+            end else if (busy) begin
+                // sum represents {C,A} after addition.
+                // Shift the complete 9-bit {C,A,Q} right by one.
+                {C, A, Q} <= {sum, Q} >> 1;
+                count <= count + 1'b1;
+
+                if (count == 3) begin // Fourth add-and-shift cycle.
+                    busy <= 0;
+                    done <= 1;
+                end
+            end
+        end 
+    end
+endmodule
